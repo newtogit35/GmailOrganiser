@@ -90,7 +90,7 @@ with col_a:
 
         # Use this hash to update your counter
         # This tells you "User XYZ ran a scan" without knowing XYZ is "Shaivya"
-        requests.get(f"https://api.countapi.xyz/hit/gmail-cleanup-app/{user_id_hash}")
+        requests.get(f"https://api.countapi.xyz/hit/my-gmail-cleanup-app/{user_id_hash}")
         
         status_msg = st.info("📑 Gathering email list...")
         while len(all_messages) < target_limit:
