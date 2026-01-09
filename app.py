@@ -7,6 +7,9 @@ import time
 import hashlib
 from datetime import datetime # NEW
 from auth import get_gmail_service
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+from datetime import datetime
 
 # --- 1. INITIALIZATION ---
 if 'leaderboard' not in st.session_state:
@@ -56,20 +59,13 @@ def create_future_filter(service, sender_email):
     filter_rule = {
         'criteria': {'from': sender_email},
         'action': {'addLabelIds': ['TRASH'], 'removeLabelIds': ['INBOX']}
+        log_event(user_id_hash, "block")
     }
     service.users().settings().filters().create(userId='me', body=filter_rule).execute()
 
 # --- 4. MAIN UI ---
 st.set_page_config(page_title="Clean up your Gmail", layout="wide")
 st.title("📬 Clean up your Gmail")
-
-# Display Community Goal
-try:
-    response = requests.get("https://api.countapi.xyz/get/my-gmail-cleanup-app/scans")
-    global_scans = response.json().get('value', 0)
-    st.info(f"🌍 **Community Goal:** {global_scans} successful scans performed by users worldwide!")
-except:
-    st.info("🌍 Join the community and start your first scan!")
 
 # Display Timestamp at the top
 if st.session_state.last_scanned:
@@ -87,10 +83,8 @@ with col_a:
 
         # Inside your "Start Scanning" button logic:
         user_id_hash = hashlib.sha256(service.users().getProfile(userId='me').execute()['emailAddress'].encode()).hexdigest()
-
-        # Use this hash to update your counter
-        # This tells you "User XYZ ran a scan" without knowing XYZ is "Shaivya"
-        requests.get(f"https://api.countapi.xyz/hit/my-gmail-cleanup-app/{user_id_hash}")
+        user_id_hash = hashlib.sha256(service.users().getProfile(userId='me').execute()['emailAddress'].encode()).hexdigest()
+log_event(user_id_hash, "scan") # Logs a scan for this user
         
         status_msg = st.info("📑 Gathering email list...")
         while len(all_messages) < target_limit:
@@ -131,14 +125,6 @@ with col_a:
         # Update timestamp on completion
         st.session_state.last_scanned = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         st.rerun()
-
-# ... inside the Scan button logic, after st.session_state.last_scanned is updated ...
-try:
-    # This hits a unique 'key' for your app and increments it by 1
-    # Replace 'my-gmail-cleanup-app' with any unique name you want
-    requests.get("https://api.countapi.xyz/hit/my-gmail-cleanup-app/scans")
-except:
-    pass # If the counter fails, the app should still keep running
 
 with col_b:
     if st.button("🗑️ Reset All Data", use_container_width=True):
@@ -195,6 +181,9 @@ if st.session_state.leaderboard:
                     st.toast(f"Cleaned {sender}")
                     del st.session_state.leaderboard[sender]
                     st.rerun()
+
+            # Assuming 'total_deleted' is the length of the messages list
+            log_event(user_id_hash, "delete", count=len(messages))
             
             if btn_col2.button("Block Future", key=f"fut_{sender}"):
                 confirm_future_delete(service, sender)
@@ -233,3 +222,26 @@ with st.sidebar:
     st.link_button("Revoke App Access", revoke_url, use_container_width=True)
     
     st.caption("Clicking above will open your Google Security settings where you can remove this app's permissions.")
+
+# Initialize connection
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+def log_event(user_hash, action, count=1):
+    try:
+        # 1. Get existing data
+        existing_data = conn.read(worksheet="Sheet1", ttl=0)
+        
+        # 2. Create new row
+        new_row = pd.DataFrame([{
+            "user_hash": user_hash,
+            "action_type": action,
+            "count": count,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }])
+        
+        # 3. Append and update
+        updated_df = pd.concat([existing_data, new_row], ignore_index=True)
+        conn.update(worksheet="Sheet1", data=updated_df)
+    except Exception as e:
+        # We use a silent pass so the user experience isn't ruined if logging fails
+        print(f"Logging failed: {e}")
