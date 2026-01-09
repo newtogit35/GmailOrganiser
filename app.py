@@ -132,8 +132,6 @@ with col_a:
         st.session_state.last_scanned = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         st.rerun()
 
-import requests # Add this at the very top of app.py
-
 # ... inside the Scan button logic, after st.session_state.last_scanned is updated ...
 try:
     # This hits a unique 'key' for your app and increments it by 1
