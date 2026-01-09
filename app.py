@@ -84,7 +84,7 @@ with col_a:
         # Inside your "Start Scanning" button logic:
         user_id_hash = hashlib.sha256(service.users().getProfile(userId='me').execute()['emailAddress'].encode()).hexdigest()
         user_id_hash = hashlib.sha256(service.users().getProfile(userId='me').execute()['emailAddress'].encode()).hexdigest()
-log_event(user_id_hash, "scan") # Logs a scan for this user
+        log_event(user_id_hash, "scan") # Logs a scan for this user
         
         status_msg = st.info("📑 Gathering email list...")
         while len(all_messages) < target_limit:
