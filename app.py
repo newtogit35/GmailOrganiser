@@ -1,3 +1,5 @@
+import requests  # Add this line!
+import os.path
 import streamlit as st
 import mmh3
 import numpy as np
