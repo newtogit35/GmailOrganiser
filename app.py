@@ -5,6 +5,14 @@ import time
 from datetime import datetime # NEW
 from auth import get_gmail_service
 
+# Display Community Goal
+try:
+    response = requests.get("https://api.countapi.xyz/get/my-gmail-cleanup-app/scans")
+    global_scans = response.json().get('value', 0)
+    st.info(f"🌍 **Community Goal:** {global_scans} successful scans performed by users worldwide!")
+except:
+    st.info("🌍 Join the community and start your first scan!")
+
 # --- 1. INITIALIZATION ---
 if 'leaderboard' not in st.session_state:
     st.session_state.leaderboard = {}
@@ -114,6 +122,16 @@ with col_a:
         st.session_state.last_scanned = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         st.rerun()
 
+import requests # Add this at the very top of app.py
+
+# ... inside the Scan button logic, after st.session_state.last_scanned is updated ...
+try:
+    # This hits a unique 'key' for your app and increments it by 1
+    # Replace 'my-gmail-cleanup-app' with any unique name you want
+    requests.get("https://api.countapi.xyz/hit/my-gmail-cleanup-app/scans")
+except:
+    pass # If the counter fails, the app should still keep running
+
 with col_b:
     if st.button("🗑️ Reset All Data", use_container_width=True):
         st.session_state.grid = np.zeros((4, 1000))
@@ -159,7 +177,7 @@ if st.session_state.leaderboard:
             # UI Display
             c1, c2, c3, c4 = st.columns([1, 4, 2, 4])
             c1.write(f"#{rank}")
-            c2.write(f"**{sender}**")
+            c2.write(f"`{sender}`")
             c3.write(str(exact_count))
             
             # Action Buttons
