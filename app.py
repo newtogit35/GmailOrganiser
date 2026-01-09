@@ -5,11 +5,11 @@ import mmh3
 import numpy as np
 import time
 import hashlib
+import pandas as pd
 from datetime import datetime # NEW
 from auth import get_gmail_service
-from streamlit_gsheets import GSheetsConnection
-import pandas as pd
 from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
 
 # --- 1. INITIALIZATION ---
 if 'leaderboard' not in st.session_state:
@@ -18,6 +18,7 @@ if 'grid' not in st.session_state:
     st.session_state.grid = np.zeros((4, 1000))
 if 'last_scanned' not in st.session_state: # NEW
     st.session_state.last_scanned = None
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. MATHEMATICAL ENGINE ---
 def update_sketch(email):
@@ -222,9 +223,6 @@ with st.sidebar:
     st.link_button("Revoke App Access", revoke_url, use_container_width=True)
     
     st.caption("Clicking above will open your Google Security settings where you can remove this app's permissions.")
-
-# Initialize connection
-conn = st.connection("gsheets", type=GSheetsConnection)
 
 def log_event(user_hash, action, count=1):
     try:
