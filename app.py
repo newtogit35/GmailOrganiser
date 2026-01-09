@@ -2,16 +2,9 @@ import streamlit as st
 import mmh3
 import numpy as np
 import time
+import hashlib
 from datetime import datetime # NEW
 from auth import get_gmail_service
-
-# Display Community Goal
-try:
-    response = requests.get("https://api.countapi.xyz/get/my-gmail-cleanup-app/scans")
-    global_scans = response.json().get('value', 0)
-    st.info(f"🌍 **Community Goal:** {global_scans} successful scans performed by users worldwide!")
-except:
-    st.info("🌍 Join the community and start your first scan!")
 
 # --- 1. INITIALIZATION ---
 if 'leaderboard' not in st.session_state:
@@ -68,6 +61,14 @@ def create_future_filter(service, sender_email):
 st.set_page_config(page_title="Clean up your Gmail", layout="wide")
 st.title("📬 Clean up your Gmail")
 
+# Display Community Goal
+try:
+    response = requests.get("https://api.countapi.xyz/get/my-gmail-cleanup-app/scans")
+    global_scans = response.json().get('value', 0)
+    st.info(f"🌍 **Community Goal:** {global_scans} successful scans performed by users worldwide!")
+except:
+    st.info("🌍 Join the community and start your first scan!")
+
 # Display Timestamp at the top
 if st.session_state.last_scanned:
     st.caption(f"🕒 Last successful scan: {st.session_state.last_scanned}")
@@ -81,6 +82,13 @@ with col_a:
         all_messages = []
         next_page_token = None
         target_limit = 20000
+
+        # Inside your "Start Scanning" button logic:
+        user_id_hash = hashlib.sha256(service.users().getProfile(userId='me').execute()['emailAddress'].encode()).hexdigest()
+
+        # Use this hash to update your counter
+        # This tells you "User XYZ ran a scan" without knowing XYZ is "Shaivya"
+        requests.get(f"https://api.countapi.xyz/hit/gmail-cleanup-app/{user_id_hash}")
         
         status_msg = st.info("📑 Gathering email list...")
         while len(all_messages) < target_limit:
@@ -190,3 +198,38 @@ if st.session_state.leaderboard:
             
             if btn_col2.button("Block Future", key=f"fut_{sender}"):
                 confirm_future_delete(service, sender)
+
+with st.expander("🛡️ Privacy Policy & Data Usage"):
+    st.markdown("""
+    ### Privacy Policy
+    **Effective Date:** January 2026
+    
+    This app is designed to help you identify and manage high-volume email senders. Your privacy is our top priority.
+    
+    **1. Data Access**
+    * The app requests access to your Gmail unread headers to calculate sender frequency.
+    * We **do not** read, store, or transmit the content of your emails.
+    * All processing is done in your active browser session.
+    
+    **2. Data Collection**
+    * **Personal Data:** We do not collect or store your name, email address, or contact list.
+    * **Usage Data:** We track the **total number of unique scans** across all users to measure app success. This data is completely anonymized and cannot be linked back to you.
+    
+    **3. Third-Party Services**
+    * We use the Google Gmail API to provide the service. Your data remains within the Google ecosystem.
+    
+    **4. Your Control**
+    * You can revoke the app's access at any time by clicking on "Revoke Access".
+    """)
+
+# In your sidebar or at the bottom of the page
+with st.sidebar:
+    st.divider()
+    st.subheader("🔐 Data Control")
+    st.write("Want to disconnect your Gmail?")
+    
+    # This link takes them directly to the page where they can remove your app
+    revoke_url = "https://myaccount.google.com/permissions"
+    st.link_button("Revoke App Access", revoke_url, use_container_width=True)
+    
+    st.caption("Clicking above will open your Google Security settings where you can remove this app's permissions.")
