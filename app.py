@@ -59,9 +59,9 @@ def create_future_filter(service, sender_email):
     filter_rule = {
         'criteria': {'from': sender_email},
         'action': {'addLabelIds': ['TRASH'], 'removeLabelIds': ['INBOX']}
-        log_event(user_id_hash, "block")
     }
     service.users().settings().filters().create(userId='me', body=filter_rule).execute()
+    log_event(user_id_hash, "block")
 
 # --- 4. MAIN UI ---
 st.set_page_config(page_title="Clean up your Gmail", layout="wide")
@@ -186,7 +186,7 @@ if st.session_state.leaderboard:
             log_event(user_id_hash, "delete", count=len(messages))
             
             if btn_col2.button("Block Future", key=f"fut_{sender}"):
-                confirm_future_delete(service, sender)
+                confirm_future_delete(service, sender, user_id_hash)
 
 with st.expander("🛡️ Privacy Policy & Data Usage"):
     st.markdown("""
