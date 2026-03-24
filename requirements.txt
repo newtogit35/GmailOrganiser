@@ -1,8 +1,8 @@
 streamlit
+requests
 mmh3
 numpy
 pandas
 google-api-python-client
 google-auth-oauthlib
-requests
-st-gsheets-connection
+google-auth-httplib2
