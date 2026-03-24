@@ -8,6 +8,7 @@ import hashlib
 import pandas as pd
 from datetime import datetime
 from auth import get_gmail_service
+import streamlit.components.v1 as components
 
 # <!-- Google Tag Manager -->
 gtm_id = "GTM-54JS276X"
