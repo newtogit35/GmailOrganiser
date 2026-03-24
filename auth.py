@@ -1,60 +1,74 @@
 import streamlit as st
-import json
+import requests
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import Flow
 
+# Same scopes as your Google Console screenshot
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/gmail.settings.basic'
 ]
 
 def get_gmail_service():
-    # 1. Check for existing credentials
+    # 1. If already logged in, just return the service
     if 'google_creds' in st.session_state:
         return build('gmail', 'v1', credentials=st.session_state.google_creds)
 
-    # 2. Get config from secrets
-    client_config = st.secrets["google_oauth"]
-    config_data = client_config.get("web", client_config)
-    redirect_uri = config_data["redirect_uris"][0] if "redirect_uris" in config_data else config_data["redirect_uri"]
+    # 2. Extract configuration from secrets
+    client_config = st.secrets["google_oauth"]["web"]
+    client_id = client_config["client_id"]
+    client_secret = client_config["client_secret"]
+    redirect_uri = client_config["redirect_uris"][0]
 
-    # 3. Create a Flow object
-    # We define it inside the function so it's fresh each time
-    flow = Flow.from_client_config(
-        {"web": config_data},
-        scopes=SCOPES,
-        redirect_uri=redirect_uri
-    )
-
-    # 4. Handle the redirect back from Google
+    # 3. Check if Google sent an authorization code in the URL
     code = st.query_params.get("code")
-    
-    if code:
+
+    if not code:
+        # STEP A: Create the Login URL manually
+        auth_url = (
+            f"https://accounts.google.com/o/oauth2/v2/auth?"
+            f"client_id={client_id}&"
+            f"redirect_uri={redirect_uri}&"
+            f"response_type=code&"
+            f"scope={' '.join(SCOPES)}&"
+            f"access_type=offline&prompt=consent"
+        )
+        st.info("To use this app, please authorize access to your Gmail.")
+        st.link_button("🔗 Sign in with Google", auth_url, use_container_width=True)
+        st.stop()
+    else:
+        # STEP B: Manually exchange the code for a token via a POST request
+        # This bypasses the "code verifier" error entirely
         try:
-            # THE FIX: fetch_token(code=code) sometimes triggers the PKCE error.
-            # We use authorization_response to let the library parse the full URL, 
-            # which usually resolves the verifier mismatch.
-            full_url = st.get_option("browser.gatherUsageStats") # Placeholder to get base URL
-            # We recreate the full response URL manually to satisfy the library
-            proto = "https" if "streamlit.app" in redirect_uri else "http"
-            auth_response = f"{redirect_uri}?{st.query_params.to_dict()}"
+            token_url = "https://oauth2.googleapis.com/token"
+            data = {
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            }
+            response = requests.post(token_url, data=data).json()
             
-            # Use authorization_response instead of code=code
-            flow.fetch_token(code=code) 
+            if "error" in response:
+                st.error(f"Auth Error: {response.get('error_description', 'Unknown error')}")
+                st.query_params.clear()
+                st.stop()
+
+            # Create credentials and save to session
+            creds = Credentials(
+                token=response["access_token"],
+                refresh_token=response.get("refresh_token"),
+                token_uri=token_url,
+                client_id=client_id,
+                client_secret=client_secret,
+                scopes=SCOPES
+            )
             
-            st.session_state.google_creds = flow.credentials
+            st.session_state.google_creds = creds
             st.query_params.clear()
             st.rerun()
+            
         except Exception as e:
-            # If fetch_token fails, it's often because the 'code' expired.
-            # Clear params so user can click the button again.
-            st.query_params.clear()
-            st.error(f"Handshake failed: {e}. Please try clicking the button again.")
+            st.error(f"Manual Handshake failed: {e}")
             st.stop()
-
-    # 5. Show Login Button if not authenticated
-    auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
-    st.info("To use this app, please authorize access to your Gmail.")
-    st.link_button("🔗 Sign in with Google", auth_url, use_container_width=True)
-    st.stop()
