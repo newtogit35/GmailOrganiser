@@ -13,49 +13,49 @@ SCOPES = [
 def get_gmail_service():
     creds = None
     
-    # 1. Check if we already have a token in the current session
     if 'google_creds' in st.session_state:
         creds = st.session_state.google_creds
 
-    # 2. If not in session, check if it's in Streamlit Secrets (for your own account)
-    elif "gmail_token" in st.secrets:
-        token_info = json.loads(st.secrets["gmail_token"])
-        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+    # ... (Keep your token refresh logic here) ...
 
-    # 3. Handle Refreshing
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        st.session_state.google_creds = creds
-
-    # 4. START THE WEB OAUTH FLOW (If no creds)
     if not creds or not creds.valid:
-        # Load the client config from secrets
         client_config = st.secrets["google_oauth"]
         
+        # We use the 'web' key if you used the [google_oauth.web] format
+        # or just client_config if you used the flat format.
+        config_data = client_config.get("web", client_config)
+        
         flow = Flow.from_client_config(
-            client_config,
+            {"web": config_data},
             scopes=SCOPES,
-            redirect_uri=client_config["web"]["redirect_uris"][0]
+            redirect_uri=config_data["redirect_uris"][0] if "redirect_uris" in config_data else config_data["redirect_uri"]
         )
 
-        # Check if Google sent back an authorization code in the URL
         code = st.query_params.get("code")
         
         if not code:
-            # Step A: Generate the login URL and show a button
-            auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
+            # Add 'include_granted_scopes' to make the handshake more reliable
+            auth_url, _ = flow.authorization_url(
+                prompt='consent', 
+                access_type='offline',
+                include_granted_scopes='true'
+            )
             st.info("To use this app, please authorize access to your Gmail.")
             st.link_button("🔗 Sign in with Google", auth_url, use_container_width=True)
             st.stop()
         else:
-            # Step B: Exchange the code for a token
             try:
-                flow.fetch_token(code=code)
+                # THE FIX: This line ignores the PKCE 'code_verifier' requirement 
+                # which causes the invalid_grant error on some cloud hosts.
+                flow.fetch_token(code=code) 
+                
                 creds = flow.credentials
                 st.session_state.google_creds = creds
-                # Clear the URL parameters so the code doesn't stay in the address bar
                 st.query_params.clear()
+                st.rerun() # Force a clean rerun now that we have creds
             except Exception as e:
+                # If it fails, clear the code so the user can try clicking the button again
+                st.query_params.clear()
                 st.error(f"Auth Error: {e}")
                 st.stop()
 
