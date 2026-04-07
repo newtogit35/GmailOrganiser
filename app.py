@@ -6,6 +6,7 @@ import numpy as np
 import time
 import hashlib
 import pandas as pd
+import threading
 from datetime import datetime
 from auth import get_gmail_service
 import streamlit.components.v1 as components
@@ -83,9 +84,24 @@ def delete_existing_emails(service, sender_email):
             st.toast(f"No emails found for {sender_email}")
             return 0
         
-        for msg in messages:
-            service.users().messages().trash(userId='me', id=msg['id']).execute()
+        # for msg in messages:
+        #     service.users().messages().trash(userId='me', id=msg['id']).execute()
+        # return len(messages)
+
+    #update to delete messages using batch
+    msg_ids = [m['id'] for m in messages]
+        for i in range(0, len(msg_ids), 1000):
+            batch = msg_ids[i:i+1000]
+            service.users().messages().batchModify(
+                userId='me',
+                body={
+                    'ids': batch,
+                    'addLabelIds': ['TRASH'],
+                    'removeLabelIds': ['INBOX']
+                }
+            ).execute()
         return len(messages)
+
     except Exception as e:
         st.error(f"Gmail API Error: {e}")
         return 0
@@ -261,17 +277,34 @@ if st.session_state.leaderboard:
             # ... (Buttons stay the same) ...
             
             btn_col1, btn_col2 = c4.columns(2)
-            if btn_col1.button("Delete Past", key=f"del_{sender}"):
-                deleted_count = delete_existing_emails(service, sender)
-                if deleted_count > 0:
-                    # NEW: Subtract this sender's footprint from the total
-                    deleted_weight = st.session_state.sender_sizes.get(sender, 0)
-                    st.session_state.total_size -= deleted_weight
+#             if btn_col1.button("Delete Past", key=f"del_{sender}"):
+#                 deleted_count = delete_existing_emails(service, sender)
+#                 if deleted_count > 0:
+#                     # NEW: Subtract this sender's footprint from the total
+#                     deleted_weight = st.session_state.sender_sizes.get(sender, 0)
+#                     st.session_state.total_size -= deleted_weight
 
-#                    log_event(st.session_state.user_id_hash, "delete", count=deleted_count)
-                    st.toast(f"Cleaned {sender}")
-                    del st.session_state.leaderboard[sender]
-                    st.rerun()
+# #                    log_event(st.session_state.user_id_hash, "delete", count=deleted_count)
+#                     st.toast(f"Cleaned {sender}")
+#                     del st.session_state.leaderboard[sender]
+#                     st.rerun()
+            if btn_col1.button("Delete Past", key=f"del_{sender}"):
+                # 1. Immediate UI update (The "Optimistic" part)
+                deleted_weight = st.session_state.sender_sizes.get(sender, 0)
+                st.session_state.total_size -= deleted_weight
+                del st.session_state.leaderboard[sender]
+                
+                # 2. Run deletion in the background so the UI doesn't freeze
+                thread = threading.Thread(
+                    target=delete_existing_emails, 
+                    args=(service, sender)
+                )
+                thread.start()
+                
+                # 3. Quick feedback
+                st.toast(f"Cleaning {sender} in the background... 🧹")
+                time.sleep(0.5) # Short pause so the user sees the row vanish
+                st.rerun()
             
             if btn_col2.button("Block Future", key=f"fut_{sender}"):
                 confirm_future_delete(service, sender, st.session_state.user_id_hash)
