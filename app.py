@@ -40,31 +40,10 @@ if 'last_scanned' not in st.session_state:
     st.session_state.last_scanned = None
 if 'user_id_hash' not in st.session_state:
     st.session_state.user_id_hash = None
+if 'excluded_senders' not in st.session_state: 
+    st.session_state.excluded_senders = set()
 
-
-# --- 2. LOGGING ENGINE ---
-# def log_event(user_hash, action, count=1):
-#     """Logs app activity to Google Sheets for analytics."""
-#     try:
-#         # Read current data from Sheet1
-#         existing_data = conn.read(worksheet="Sheet1", ttl=0)
-        
-#         # Prepare new entry
-#         new_row = pd.DataFrame([{
-#             "user_hash": user_hash,
-#             "action_type": action,
-#             "count": count,
-#             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-#         }])
-        
-#         # Append and push update
-#         updated_df = pd.concat([existing_data, new_row], ignore_index=True)
-#         conn.update(worksheet="Sheet1", data=updated_df)
-#     except Exception as e:
-#         # Fails silently in UI but shows in logs to keep app running
-#         print(f"Logging failed: {e}")
-
-# --- 3. GMAIL & MATH ENGINE ---
+# --- 2. GMAIL & MATH ENGINE ---
 def update_sketch(email):
     """Uses Count-Min Sketch to estimate sender frequency."""
     counts = []
@@ -127,7 +106,7 @@ def confirm_future_delete(service, sender_email, user_id_hash):
         st.success(f"Blocked {sender_email}!")
         st.rerun()
 
-# --- 4. MAIN UI ---
+# --- 3. MAIN UI ---
 st.set_page_config(page_title="Clean up your Gmail", layout="wide")
 st.title("📬 Clean up your Gmail")
 
@@ -232,17 +211,19 @@ with st.sidebar:
 # ADD THESE TWO LINES TO CLEAR THE SIZE METRICS
         st.session_state.total_size = 0
         st.session_state.sender_sizes = {}
+        st.session_state.excluded_senders = set()
         st.rerun()
     
     st.info("Tip: Close this sidebar using the arrow (>) at the top left for a full-screen table view.")
 
-# --- 5. RESULTS ORGANIZATION ---
+# --- 4. RESULTS ORGANIZATION ---
 if st.session_state.leaderboard:
     st.divider()
     st.subheader("📊 Ranked Heavy Hitters")
     
-    # 1. Get the top candidates based on estimates
-    candidates = sorted(st.session_state.leaderboard.items(), key=lambda x: x[1], reverse=True)[:15]
+    # 1. Get the top candidates, FILTERING OUT whitelisted senders
+    all_candidates = sorted(st.session_state.leaderboard.items(), key=lambda x: x[1], reverse=True)
+    candidates = [c for c in all_candidates if c[0] not in st.session_state.excluded_senders][:15]
     service = get_gmail_service()
     
     # 2. PRE-VERIFY: Get actual counts for just these 15
@@ -276,40 +257,56 @@ if st.session_state.leaderboard:
             c3.write(f"**{exact_count}**")
             # ... (Buttons stay the same) ...
             
-            btn_col1, btn_col2 = c4.columns(2)
-#             if btn_col1.button("Delete Past", key=f"del_{sender}"):
-#                 deleted_count = delete_existing_emails(service, sender)
-#                 if deleted_count > 0:
-#                     # NEW: Subtract this sender's footprint from the total
-#                     deleted_weight = st.session_state.sender_sizes.get(sender, 0)
-#                     st.session_state.total_size -= deleted_weight
-
-# #                    log_event(st.session_state.user_id_hash, "delete", count=deleted_count)
-#                     st.toast(f"Cleaned {sender}")
-#                     del st.session_state.leaderboard[sender]
-#                     st.rerun()
-            if btn_col1.button("Delete Past", key=f"del_{sender}"):
-                # 1. Immediate UI update (The "Optimistic" part)
+           # Create three columns for the three actions
+            btn_col1, btn_col2, btn_col3 = c4.columns(3)
+            
+            if btn_col1.button("Delete", key=f"del_{sender}", help="Move all to Trash"):
+                # 1. Immediate UI update
                 deleted_weight = st.session_state.sender_sizes.get(sender, 0)
                 st.session_state.total_size -= deleted_weight
                 del st.session_state.leaderboard[sender]
                 
-                # 2. Run deletion in the background so the UI doesn't freeze
-                thread = threading.Thread(
-                    target=delete_existing_emails, 
-                    args=(service, sender)
-                )
+                # 2. Background thread
+                thread = threading.Thread(target=delete_existing_emails, args=(service, sender))
                 thread.start()
                 
-                # 3. Quick feedback
-                st.toast(f"Cleaning {sender} in the background... 🧹")
-                time.sleep(0.5) # Short pause so the user sees the row vanish
+                st.toast(f"Cleaning {sender}... 🧹")
+                time.sleep(0.5)
                 st.rerun()
             
-            if btn_col2.button("Block Future", key=f"fut_{sender}"):
+            if btn_col2.button("Block", key=f"fut_{sender}", help="Create a filter"):
                 confirm_future_delete(service, sender, st.session_state.user_id_hash)
 
-# --- 6. FOOTER & PRIVACY ---
+            if btn_col3.button("Ignore", key=f"ign_{sender}", help="Keep these emails & hide from list"):
+                st.session_state.excluded_senders.add(sender)
+                if sender in st.session_state.leaderboard:
+                    del st.session_state.leaderboard[sender]
+                st.toast(f"Whitelisted {sender}")
+                time.sleep(0.5)
+                st.rerun()
+
+# --- 4b. WHITELIST MANAGEMENT ---
+if st.session_state.excluded_senders:
+    st.divider()
+    st.subheader("🗂️ Ignored Senders (Whitelisted)")
+    st.caption("These senders are excluded from your 'Heavy Hitters' list. They will not be touched.")
+    
+    with st.container(border=True):
+        w_col1, w_col2 = st.columns([4, 1])
+        w_col1.write("**Sender Email**")
+        w_col2.write("**Action**")
+        
+        for ignored_sender in sorted(list(st.session_state.excluded_senders)):
+            wi_col1, wi_col2 = st.columns([4, 1])
+            wi_col1.write(f"`{ignored_sender}`")
+            
+            if wi_col2.button("Include Back", key=f"inc_{ignored_sender}", use_container_width=True):
+                st.session_state.excluded_senders.remove(ignored_sender)
+                st.toast(f"Restored {ignored_sender}")
+                time.sleep(0.5)
+                st.rerun()
+
+# --- 5. FOOTER & PRIVACY ---
 st.divider()
 with st.expander("🛡️ Privacy Policy & Data Usage"):
     st.markdown("""
