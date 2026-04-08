@@ -316,6 +316,10 @@ def render_heavy_hitters():
     
     # 2. Verify top 15
     verified_data = []
+    # Add a caption so users know why it might pause for a split second
+    status_msg = st.empty()
+    status_msg.caption("Refining rankings...") 
+    
     for sender, estimate in candidates:
         try:
             res = service.users().messages().list(userId='me', q=f"from:{sender} in:inbox", maxResults=500).execute()
@@ -368,9 +372,6 @@ def render_heavy_hitters():
             st.session_state.actioned_senders = set()
             st.rerun() # Full rerun to bring in next 15 from scratch
 
-# Call the function to display it
-render_heavy_hitters()
-
 # --- 4b. WHITELIST MANAGEMENT ---
 if st.session_state.excluded_senders:
     st.divider()
@@ -391,6 +392,11 @@ if st.session_state.excluded_senders:
                 st.toast(f"Restored {ignored_sender}")
                 time.sleep(0.5)
                 st.rerun()
+
+# Call the function to display it
+render_heavy_hitters()
+
+
 
 # --- 5. FOOTER & PRIVACY ---
 st.divider()
