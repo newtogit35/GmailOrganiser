@@ -364,7 +364,7 @@ def render_heavy_hitters():
     
     for sender, estimate in candidates:
         try:
-            res = service.users().messages().list(userId='me', q=f"from:{sender} in:inbox", maxResults=500).execute()
+            res = service.users().messages().list(userId='me', q=f"from:{sender} in:inbox", maxResults=1000).execute()
             count = len(res.get('messages', []))
             verified_data.append((sender, count))
         except:
