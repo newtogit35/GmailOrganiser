@@ -55,36 +55,78 @@ def update_sketch(email):
         counts.append(st.session_state.grid[row][col])
     st.session_state.leaderboard[email] = int(min(counts))
 
-def delete_existing_emails(service, sender_email):
-    """Trashes unread emails from a specific sender."""
-    query = f"from:{sender_email} in:inbox"
-    try:
-        results = service.users().messages().list(userId='me', q=query).execute()
-        messages = results.get('messages', [])
-        if not messages:
-            st.toast(f"No emails found for {sender_email}")
-            return 0
-        
-        # for msg in messages:
-        #     service.users().messages().trash(userId='me', id=msg['id']).execute()
-        # return len(messages)
+# def delete_existing_emails(service, sender_email):
+#     """Trashes unread emails from a specific sender."""
+#     query = f"from:{sender_email} in:inbox"
+#     try:
+#         results = service.users().messages().list(userId='me', q=query).execute()
+#         messages = results.get('messages', [])
+#         if not messages:
+#             st.toast(f"No emails found for {sender_email}")
+#             return 0
 
-    #update to delete messages using batch
-        msg_ids = [m['id'] for m in messages]
-        for i in range(0, len(msg_ids), 1000):
-          batch = msg_ids[i:i+1000]
-          service.users().messages().batchModify(
-              userId='me',
-              body={
-                  'ids': batch,
-                  'addLabelIds': ['TRASH'],
-                  'removeLabelIds': ['INBOX']
-                 }
-          ).execute()
-        return len(messages)
+#     #update to delete messages using batch
+#         msg_ids = [m['id'] for m in messages]
+#         for i in range(0, len(msg_ids), 1000):
+#           batch = msg_ids[i:i+1000]
+#           service.users().messages().batchModify(
+#               userId='me',
+#               body={
+#                   'ids': batch,
+#                   'addLabelIds': ['TRASH'],
+#                   'removeLabelIds': ['INBOX']
+#                  }
+#           ).execute()
+#         return len(messages)
+
+#     except Exception as e:
+#         st.error(f"Gmail API Error: {e}")
+#         return 0
+
+def delete_existing_emails(service, sender_email):
+    """Trashes ALL emails from a specific sender by looping through all pages."""
+    query = f"from:{sender_email} in:inbox"
+    total_deleted = 0
+    next_page_token = None
+    
+    try:
+        while True:
+            # 1. Fetch a page of messages
+            results = service.users().messages().list(
+                userId='me', 
+                q=query, 
+                pageToken=next_page_token
+            ).execute()
+            
+            messages = results.get('messages', [])
+            if not messages and total_deleted == 0:
+                st.toast(f"No emails found for {sender_email}")
+                return 0
+            elif not messages:
+                break # No more pages left
+
+            # 2. Batch delete this page (max 1000 per Gmail API limit)
+            msg_ids = [m['id'] for m in messages]
+            service.users().messages().batchModify(
+                userId='me',
+                body={
+                    'ids': msg_ids,
+                    'addLabelIds': ['TRASH'],
+                    'removeLabelIds': ['INBOX']
+                }
+            ).execute()
+            
+            total_deleted += len(messages)
+            
+            # 3. Check if there's another page
+            next_page_token = results.get('nextPageToken')
+            if not next_page_token:
+                break
+        
+        return total_deleted
 
     except Exception as e:
-        st.error(f"Gmail API Error: {e}")
+        st.error(f"Gmail API Error during mass delete: {e}")
         return 0
 
 def create_future_filter(service, sender_email, user_id_hash):
