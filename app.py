@@ -152,6 +152,24 @@ def confirm_future_delete(service, sender_email, user_id_hash):
         st.success(f"Blocked {sender_email}!")
         st.rerun()
 
+@st.dialog("Confirm Bulk Auto-Delete Filters")
+def trigger_bulk_block_dialog(service, selected_senders, user_id_hash):
+    st.warning(f"You are creating permanent Gmail filters for {len(selected_senders)} senders simultaneously.")
+    st.write("Future emails from the following accounts will bypass the inbox and head straight to Trash:")
+    
+    # Render scannable listed elements of everything selected
+    for sender, count in selected_senders:
+        st.markdown(f"* `{sender}` ({count} emails pending cleanup)")
+        
+    st.write("") # Spacing
+    if st.button("Confirm Massive Block", type="primary", use_container_width=True):
+        for sender, _ in selected_senders:
+            create_future_filter(service, sender, user_id_hash)
+            st.session_state.actioned_senders.add(sender)
+        st.success(f"Successfully deployed rules for {len(selected_senders)} rules!")
+        time.sleep(1)
+        st.rerun()
+
 # --- 3. MAIN UI ---
 st.set_page_config(page_title="Clean up your Gmail", layout="wide")
 st.title("📬 Clean up your Gmail")
@@ -374,16 +392,36 @@ def render_heavy_hitters():
     
     top_k = sorted(verified_data, key=lambda x: x[1], reverse=True)
 
-    # 3. Static Table Display
+  # 3. Dynamic Table Display with Multi-Select Checkboxes
     with st.container(border=True):
-        st.columns([1, 4, 2, 4]) # Headers placeholder
+        # Header Row: We add an extra column at the front for the checkboxes
+        h0, h1, h2, h3, h4 = st.columns([0.5, 1, 4, 2, 4])
+        h1.write("**Rank**")
+        h2.write("**Sender Email**")
+        h3.write("**Count**")
+        h4.write("**Instant Row Actions**")
+        
+        # Track selected senders during this render frame
+        selected_senders = []
         
         for rank, (sender, exact_count) in enumerate(top_k, 1):
-            c1, c2, c3, c4 = st.columns([1, 4, 2, 4])
+            c0, c1, c2, c3, c4 = st.columns([0.5, 1, 4, 2, 4])
+            
+            # Render multi-select checkbox if sender isn't already processed
+            is_processed = sender in st.session_state.actioned_senders or sender in st.session_state.excluded_senders
+            
+            if not is_processed:
+                # Key format ensures state persists between minor fragment reruns
+                checked = c0.checkbox("Select", key=f"chk_{sender}", label_visibility="collapsed")
+                if checked:
+                    selected_senders.append((sender, exact_count))
+            else:
+                c0.write("") # Keep blank spacing for processed items
+
             c1.write(f"#{rank}")
             c2.write(f"`{sender}`")
             
-            if sender in st.session_state.actioned_senders or sender in st.session_state.excluded_senders:
+            if is_processed:
                 c3.write("✅")
                 c4.caption("Processed")
             else:
@@ -392,13 +430,11 @@ def render_heavy_hitters():
                 
                 if btn_col1.button("Delete", key=f"del_{sender}"):
                     st.session_state.actioned_senders.add(sender)
-                    # Update size metric immediately
                     st.session_state.total_size -= st.session_state.sender_sizes.get(sender, 0)
-                    
                     thread = threading.Thread(target=delete_existing_emails, args=(service, sender))
                     thread.start()
                     st.toast(f"Cleaning {sender}...")
-                    st.rerun(scope="fragment") # Reruns ONLY this table
+                    st.rerun(scope="fragment")
 
                 if btn_col2.button("Block", key=f"fut_{sender}"):
                     confirm_future_delete(service, sender, st.session_state.user_id_hash)
@@ -406,6 +442,67 @@ def render_heavy_hitters():
                 if btn_col3.button("Ignore", key=f"ign_{sender}"):
                     st.session_state.excluded_senders.add(sender)
                     st.rerun(scope="fragment")
+
+    # --- 3b. DYNAMIC BULK ACTIONS TOOLBAR (Appears only when boxes are checked) ---
+    if selected_senders:
+        st.write("") # Formatting padding
+        with st.container(border=True):
+            b_meta, b_del, b_blk, b_ign = st.columns([4, 2, 2, 2])
+            b_meta.markdown(f"⚡ **Bulk Actions Dashboard:** `{len(selected_senders)}` senders selected.")
+            
+            # 1. BULK DELETE ACTION
+            if b_del.button("🗑️ Bulk Delete", use_container_width=True, type="primary"):
+                for sender, _ in selected_senders:
+                    st.session_state.actioned_senders.add(sender)
+                    st.session_state.total_size -= st.session_state.sender_sizes.get(sender, 0)
+                    thread = threading.Thread(target=delete_existing_emails, args=(service, sender))
+                    thread.start()
+                st.toast(f"Spawning background deletion workers for {len(selected_senders)} tasks! 🧹")
+                st.rerun()
+
+            # 2. BULK BLOCK ACTION (Triggers Multi-Sender Modal)
+            if b_blk.button("🚫 Bulk Block", use_container_width=True):
+                trigger_bulk_block_dialog(service, selected_senders, st.session_state.user_id_hash)
+
+            # 3. BULK IGNORE ACTION
+            if b_ign.button("💼 Bulk Ignore", use_container_width=True):
+                for sender, _ in selected_senders:
+                    st.session_state.excluded_senders.add(sender)
+                st.toast(f"Whitelisted {len(selected_senders)} senders.")
+                st.rerun()
+
+    # # 3. Static Table Display
+    # with st.container(border=True):
+    #     st.columns([1, 4, 2, 4]) # Headers placeholder
+        
+    #     for rank, (sender, exact_count) in enumerate(top_k, 1):
+    #         c1, c2, c3, c4 = st.columns([1, 4, 2, 4])
+    #         c1.write(f"#{rank}")
+    #         c2.write(f"`{sender}`")
+            
+    #         if sender in st.session_state.actioned_senders or sender in st.session_state.excluded_senders:
+    #             c3.write("✅")
+    #             c4.caption("Processed")
+    #         else:
+    #             c3.write(f"**{exact_count}**")
+    #             btn_col1, btn_col2, btn_col3 = c4.columns(3)
+                
+    #             if btn_col1.button("Delete", key=f"del_{sender}"):
+    #                 st.session_state.actioned_senders.add(sender)
+    #                 # Update size metric immediately
+    #                 st.session_state.total_size -= st.session_state.sender_sizes.get(sender, 0)
+                    
+    #                 thread = threading.Thread(target=delete_existing_emails, args=(service, sender))
+    #                 thread.start()
+    #                 st.toast(f"Cleaning {sender}...")
+    #                 st.rerun(scope="fragment") # Reruns ONLY this table
+
+    #             if btn_col2.button("Block", key=f"fut_{sender}"):
+    #                 confirm_future_delete(service, sender, st.session_state.user_id_hash)
+
+    #             if btn_col3.button("Ignore", key=f"ign_{sender}"):
+    #                 st.session_state.excluded_senders.add(sender)
+    #                 st.rerun(scope="fragment")
 
     # 4. The Sweep/Refresh Button inside the fragment
     if st.session_state.actioned_senders or any(s in st.session_state.excluded_senders for s, _ in top_k):
