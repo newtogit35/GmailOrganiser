@@ -281,87 +281,18 @@ with st.sidebar:
     
     st.info("Tip: Close this sidebar using the arrow (>) at the top left for a full-screen table view.")
 
-# # --- 4. RESULTS ORGANIZATION ---
-# if st.session_state.leaderboard:
-#     st.divider()
-#     st.subheader("📊 Ranked Heavy Hitters")
-    
-#     # 1. Get the top candidates, FILTERING OUT whitelisted senders
-#     all_candidates = sorted(st.session_state.leaderboard.items(), key=lambda x: x[1], reverse=True)
-#     candidates = [c for c in all_candidates if c[0] not in st.session_state.excluded_senders][:15]
-#     service = get_gmail_service()
-    
-#     # 2. PRE-VERIFY: Get actual counts for just these 15
-#     verified_data = []
-#     status_text = st.empty()
-#     status_text.caption("Refining rankings with live data...")
-    
-#     for sender, estimate in candidates:
-#         try:
-#             time.sleep(0.1) # Faster pause for pre-verification
-#             res = service.users().messages().list(userId='me', q=f"from:{sender} in:inbox", maxResults=500).execute()
-#             count = len(res.get('messages', []))
-#             verified_data.append((sender, count))
-#         except:
-#             verified_data.append((sender, estimate))
-    
-#     status_text.empty()
-
-#     # 3. RE-SORT: Sort the list again using the TRUTH
-#     top_k = sorted(verified_data, key=lambda x: x[1], reverse=True)
-
-#     # 4. DISPLAY: Now Rank #1 will always have the highest Verified Count
-#     with st.container(border=True):
-#         h1, h2, h3, h4 = st.columns([1, 4, 2, 4])
-#         # ... (Headers stay the same) ...
-
-#         for rank, (sender, exact_count) in enumerate(top_k, 1):
-#             c1, c2, c3, c4 = st.columns([1, 4, 2, 4])
-#             c1.write(f"#{rank}")
-#             c2.write(f"`{sender}`")
-            
-#             # CHECK: If sender was actioned, show a checkmark instead of buttons
-#             if sender in st.session_state.actioned_senders or sender in st.session_state.excluded_senders:
-#                 c3.write("✅")
-#                 c4.info("Processed - Click Refresh below to clear.")
-#             else:
-#                 c3.write(f"**{exact_count}**")
-#                 btn_col1, btn_col2, btn_col3 = c4.columns(3)
-                
-#                 if btn_col1.button("Delete", key=f"del_{sender}"):
-#                     # Mark as actioned immediately so it doesn't move
-#                     st.session_state.actioned_senders.add(sender)
-#                     deleted_weight = st.session_state.sender_sizes.get(sender, 0)
-#                     st.session_state.total_size -= deleted_weight
-                    
-#                     # Background delete
-#                     thread = threading.Thread(target=delete_existing_emails, args=(service, sender))
-#                     thread.start()
-#                     st.toast(f"Cleaning {sender}... 🧹")
-#                     st.rerun()
-                
-#                 if btn_col2.button("Block", key=f"fut_{sender}"):
-#                     confirm_future_delete(service, sender, st.session_state.user_id_hash)
-
-#                 if btn_col3.button("Ignore", key=f"ign_{sender}"):
-#                     st.session_state.excluded_senders.add(sender)
-#                     st.toast(f"Whitelisted {sender}")
-#                     st.rerun()
-
-# # NEW: Refresh Button to clear processed items and load next 15
-#     if st.session_state.actioned_senders or any(s in st.session_state.excluded_senders for s, _ in top_k):
-#         st.write("") # Padding
-#         if st.button("🔄 Refresh Table (Populate Next Heavy Hitters)", use_container_width=True, type="primary"):
-#             # Permanently remove processed items from leaderboard so they don't return
-#             for s in list(st.session_state.actioned_senders):
-#                 if s in st.session_state.leaderboard:
-#                     del st.session_state.leaderboard[s]
-            
-#             # Reset the action tracker for the next batch
-#             st.session_state.actioned_senders = set()
-#             st.rerun()
-
 # --- 4. RESULTS ORGANIZATION ---
+
+def bulk_delete_worker(service, senders_list):
+    """Safely processes multiple senders sequentially on a single background thread."""
+    for sender in senders_list:
+        try:
+            # Re-use your perfectly working page-by-page deletion logic safely
+            delete_existing_emails(service, sender)
+        except Exception as e:
+            # Fail silently in the background so the app never crashes
+            pass
+          
 @st.fragment
 def render_heavy_hitters():
     if not st.session_state.leaderboard:
@@ -450,14 +381,25 @@ def render_heavy_hitters():
             b_meta, b_del, b_blk, b_ign = st.columns([4, 2, 2, 2])
             b_meta.markdown(f"⚡ **Bulk Actions Dashboard:** `{len(selected_senders)}` senders selected.")
             
-            # 1. BULK DELETE ACTION
+            # 1. SAFE BULK DELETE ACTION
             if b_del.button("🗑️ Bulk Delete", use_container_width=True, type="primary"):
+                # Extract just the email addresses to pass to the worker
+                emails_to_delete = [sender for sender, _ in selected_senders]
+                
+                # Instantly update metrics and session states on the MAIN thread
                 for sender, _ in selected_senders:
                     st.session_state.actioned_senders.add(sender)
                     st.session_state.total_size -= st.session_state.sender_sizes.get(sender, 0)
-                    thread = threading.Thread(target=delete_existing_emails, args=(service, sender))
-                    thread.start()
-                st.toast(f"Spawning background deletion workers for {len(selected_senders)} tasks! 🧹")
+                
+                # Spawn ONE single thread to process the entire batch sequentially
+                bulk_thread = threading.Thread(
+                    target=bulk_delete_worker, 
+                    args=(service, emails_to_delete)
+                )
+                bulk_thread.start()
+                
+                st.toast(f"🧹 Background cleanup started for {len(emails_to_delete)} senders!")
+                time.sleep(1)
                 st.rerun()
 
             # 2. BULK BLOCK ACTION (Triggers Multi-Sender Modal)
